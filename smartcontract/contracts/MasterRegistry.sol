@@ -90,6 +90,8 @@ contract MasterRegistry is AccessControl {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
     }
 
+    function _beforeParcelMutation(string memory parcelId) internal view virtual {}
+
     // Register an original land parcel
     function registerParcel(
         bytes32 ownerReference,
@@ -118,6 +120,8 @@ contract MasterRegistry is AccessControl {
             "Plot_MH_",
             Strings.toString(nextParcelId)
         );
+
+        _beforeParcelMutation(parcelId);
 
         Parcel storage parcel = parcels[parcelId];
         parcel.parcelId = parcelId;
@@ -158,6 +162,7 @@ contract MasterRegistry is AccessControl {
         Parcel storage parent = parcels[parentKey];
         require(bytes(parent.parcelId).length > 0, "Parent parcel does not exist");
         require(parent.status == ParcelStatus.ACTIVE, "Parent parcel is not active");
+        _beforeParcelMutation(parentKey);
         require(children.length > 1, "At least two children are required");
 
         uint256 childAreaTotal;
@@ -335,6 +340,7 @@ contract MasterRegistry is AccessControl {
 
         require(bytes(source.parcelId).length > 0, "Parcel does not exist");
         require(source.status == ParcelStatus.ACTIVE, "Parcel is not active");
+        _beforeParcelMutation(parcelId);
         require(source.remainingArea > 0, "Parcel has no remaining area");
         require(transferArea > 0, "Transfer area must be greater than zero");
         require(transferArea <= source.remainingArea, "Transfer area exceeds remaining area");
@@ -397,6 +403,7 @@ contract MasterRegistry is AccessControl {
 
         require(bytes(parcel.parcelId).length > 0, "Parcel does not exist");
         require(parcel.status != ParcelStatus.INACTIVE, "Parcel is already inactive");
+        _beforeParcelMutation(parcelId);
 
         parcel.status = ParcelStatus.INACTIVE;
         parcel.remainingArea = 0;
@@ -440,6 +447,7 @@ contract MasterRegistry is AccessControl {
 
             require(bytes(source.parcelId).length > 0, "Parcel does not exist");
             require(source.status == ParcelStatus.ACTIVE, "Parcel not active");
+            _beforeParcelMutation(sourceId);
             require(areaTaken[i] > 0, "Invalid area");
             require(source.remainingArea >= areaTaken[i], "Insufficient remaining area");
 

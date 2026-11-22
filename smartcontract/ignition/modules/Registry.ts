@@ -1,26 +1,13 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
-import { ethers } from "ethers";
 
-export default buildModule("RegistryModule", (m) => {
+export default buildModule("RegistryModuleV4", (m) => {
   const admin = m.getAccount(0);
-  const disputeRegistry = m.contract("DisputeRegistry", [admin]);
-  const multiSigWallet = m.contract("MultiSigWallet", [[admin], 1]);
-
-  const registryWriterRole = ethers.keccak256(
-    ethers.toUtf8Bytes("REGISTRY_WRITER_ROLE")
-  );
-  const recordExecutorRole = ethers.keccak256(
-    ethers.toUtf8Bytes("RECORD_EXECUTOR_ROLE")
-  );
-
-  m.call(disputeRegistry, "grantRole", [
-    registryWriterRole,
+  const courtAuthority = m.getParameter("courtAuthority");
+  const multiSigWallet = m.contract("MultiSigWallet", [[admin,"0xbdbEfCa84352e02b431226ae5925b7A20f8C2195","0x793273ed7203391867902abb56a6A6C0B4574526"], 2]);
+  const disputeRegistry = m.contract("DisputeRegistry", [
+    admin,
     multiSigWallet,
-  ]);
-
-  m.call(disputeRegistry, "grantRole", [
-    recordExecutorRole,
-    multiSigWallet,
+    courtAuthority,
   ]);
 
   return { disputeRegistry, multiSigWallet };

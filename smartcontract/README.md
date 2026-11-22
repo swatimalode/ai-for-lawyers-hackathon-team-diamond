@@ -1,57 +1,102 @@
-# Sample Hardhat 3 Project (`mocha` and `ethers`)
+# Smart Contracts
 
-This project showcases a Hardhat 3 project using `mocha` for tests and the `ethers` library for Ethereum interactions.
+Hardhat 3 project for the land registry, dispute registry, and multisig approval workflow.
 
-To learn more about Hardhat 3, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3](https://hardhat.org/hardhat3-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+## Contracts
 
-## Project Overview
+### `DisputeRegistry.sol`
 
-This example project includes:
+The combined registry contract inherits `MasterRegistry`.
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using `mocha` and ethers.js
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+It provides:
 
-## Usage
+- Parcel registration and lifecycle operations.
+- Dispute registration and status updates.
+- One parcel-to-many dispute mappings.
+- Active disputed-area tracking.
+- Court-only dispute registration and resolution.
+- Parcel changes blocked while the parcel has an active dispute.
 
-### Running Tests
+### `MasterRegistry.sol`
 
-To run all the tests in the project, execute the following command:
+Provides:
 
-```shell
+- Parcel registration.
+- Subdivision and merger support.
+- Partial ownership transfer.
+- Parcel invalidation.
+- Parcel lookup and status history.
+
+### `MultiSigWallet.sol`
+
+Provides separate approval for contract calls:
+
+- Submit transactions.
+- Confirm or revoke confirmations.
+- Execute transactions after the confirmation threshold.
+- Cancel transactions.
+
+## Installation
+
+```bash
+npm install
+npx hardhat compile
+```
+
+## Testing
+
+Run the complete test suite:
+
+```bash
 npx hardhat test
 ```
 
-You can also selectively run the Solidity or `mocha` tests:
+## Deployment
 
-```shell
-npx hardhat test solidity
-npx hardhat test mocha
+Deploy locally or to Hardhat's configured local network:
+
+```bash
+npx hardhat ignition deploy ignition/modules/Registry.ts --network hardhatMainnet
 ```
 
-### Make a deployment to Sepolia
+The V4 module deploys `MultiSigWallet` and `DisputeRegistry`. The registry constructor binds parcel changes and dispute-status updates to that wallet address, and court registration/resolution to the required `courtAuthority` parameter.
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+Pass the court address through an Ignition parameters file:
 
-To run the deployment to a local chain:
-
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
+```json
+{
+	"RegistryModuleV4": {
+		"courtAuthority": "0xCOURT_AUTHORITY_ADDRESS"
+	}
+}
 ```
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
+```bash
+npx hardhat ignition deploy ignition/modules/Registry.ts \
+	--network sepolia \
+	--parameters ignition/parameters/sepolia.json
+```
 
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
+V4 creates new contracts; it does not change contracts from earlier deployments.
 
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
+## Roles
 
-```shell
+- `DEFAULT_ADMIN_ROLE`: role administration.
+- `REGISTRY_WRITER_ROLE`: parcel and ownership operations.
+- `RECORD_EXECUTOR_ROLE`: dispute operations.
+
+Create a multisig with more than one trusted owner for production rather than using a single-owner wallet.
+
+## Configuration
+
+For Sepolia:
+
+```bash
+npx hardhat keystore set SEPOLIA_RPC_URL
 npx hardhat keystore set SEPOLIA_PRIVATE_KEY
+npx hardhat ignition deploy ignition/modules/Registry.ts --network sepolia
 ```
 
-After setting the variable, you can run the deployment with the Sepolia network:
+## Solidity Compiler
 
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
+The project enables `viaIR` and optimizer settings to support the stack-heavy registry functions.

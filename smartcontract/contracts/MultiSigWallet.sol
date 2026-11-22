@@ -51,6 +51,11 @@ contract MultiSigWallet is ReentrancyGuard {
         _;
     }
 
+    modifier onlyWallet() {
+        require(msg.sender == address(this), "Only wallet can execute");
+        _;
+    }
+
     modifier transactionExists(uint256 transactionId) {
         require(
             transactions[transactionId].target != address(0),
@@ -187,6 +192,59 @@ contract MultiSigWallet is ReentrancyGuard {
         transaction.cancelled = true;
 
         emit TransactionCancelled(transactionId);
+    }
+
+    function addOwner(address owner)
+        external
+        onlyWallet
+    {
+        require(owner != address(0), "Invalid owner");
+        require(!isOwner[owner], "Owner already exists");
+
+        isOwner[owner] = true;
+        owners.push(owner);
+
+        emit OwnerAdded(owner);
+    }
+
+    function removeOwner(address owner)
+        external
+        onlyWallet
+    {
+        require(isOwner[owner], "Owner does not exist");
+        require(owners.length > 1, "Cannot remove the last owner");
+
+        isOwner[owner] = false;
+
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == owner) {
+                owners[i] = owners[owners.length - 1];
+                owners.pop();
+                break;
+            }
+        }
+
+        require(
+            requiredConfirmations <= owners.length,
+            "Required confirmations exceed owners"
+        );
+
+        emit OwnerRemoved(owner);
+    }
+
+    function changeRequiredConfirmations(uint256 newRequiredConfirmations)
+        external
+        onlyWallet
+    {
+        require(newRequiredConfirmations > 0, "Confirmation count too low");
+        require(
+            newRequiredConfirmations <= owners.length,
+            "Confirmation count exceeds owners"
+        );
+
+        requiredConfirmations = newRequiredConfirmations;
+
+        emit RequiredConfirmationsChanged(newRequiredConfirmations);
     }
 
     function getOwners() external view returns (address[] memory) {

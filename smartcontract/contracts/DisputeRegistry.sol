@@ -7,6 +7,11 @@ import "./MasterRegistry.sol";
 contract DisputeRegistry is MasterRegistry {
     bytes32 public constant RECORD_EXECUTOR_ROLE =
         keccak256("RECORD_EXECUTOR_ROLE");
+    bytes32 public constant COURT_AUTHORITY_ROLE =
+        keccak256("COURT_AUTHORITY_ROLE");
+
+    address public immutable registryWallet;
+    address public immutable courtAuthority;
 
     enum DisputeStatus {
         REGISTERED,
@@ -32,6 +37,8 @@ contract DisputeRegistry is MasterRegistry {
         uint256 disputedArea;
         bytes32 complaintDocumentHash;
         bytes32 evidenceHash;
+        bytes32 courtOrderHash;
+        uint256 resolvedAt;
         DisputeStatus status;
         uint256 createdAt;
     }
@@ -55,20 +62,47 @@ contract DisputeRegistry is MasterRegistry {
         DisputeStatus newStatus
     );
 
-    constructor(address admin) MasterRegistry(admin) {
-        require(admin != address(0), "Invalid admin");
+    event DisputeResolvedByCourt(
+        uint256 indexed disputeId,
+        string indexed parcelId,
+        bytes32 indexed courtOrderHash,
+        address courtAuthority
+    );
 
-        _grantRole(RECORD_EXECUTOR_ROLE, admin);
+    constructor(address admin, address registryWallet_, address courtAuthority_)
+        MasterRegistry(admin)
+    {
+        require(admin != address(0), "Invalid admin");
+        require(registryWallet_ != address(0), "Invalid registry wallet");
+        require(courtAuthority_ != address(0), "Invalid court authority");
+
+        registryWallet = registryWallet_;
+        courtAuthority = courtAuthority_;
+
+        _grantRole(REGISTRY_WRITER_ROLE, registryWallet_);
+        _grantRole(RECORD_EXECUTOR_ROLE, registryWallet_);
+        _grantRole(COURT_AUTHORITY_ROLE, courtAuthority_);
     }
 
-    function registerDispute(
+    modifier onlyRegistryWallet() {
+        require(msg.sender == registryWallet, "Only multisig can call");
+        _;
+    }
+
+    modifier onlyCourtAuthority() {
+        require(msg.sender == courtAuthority, "Only court authority can call");
+        _;
+    }
+
+    function registerDispute (
         string calldata parcelId,
         uint256 disputedArea,
         bytes32 complaintHash,
         bytes32 evidenceHash
     )
         external
-        onlyRole(RECORD_EXECUTOR_ROLE)
+        onlyRole(COURT_AUTHORITY_ROLE)
+        onlyCourtAuthority
     {
         require(disputedArea > 0, "Disputed area required");
         require(complaintHash != bytes32(0), "Complaint hash required");
@@ -78,8 +112,8 @@ contract DisputeRegistry is MasterRegistry {
 
         require(bytes(parcel.parcelId).length > 0, "Parcel does not exist");
         require(
-            parcel.status != ParcelStatus.INACTIVE,
-            "Parcel is inactive"
+            parcel.status == ParcelStatus.ACTIVE,
+            "Parcel is not active"
         );
         require(disputedArea <= parcel.remainingArea, "Disputed area exceeds parcel area");
         uint256 activeArea = activeDisputedAreaByParcel[parcelId];
@@ -96,6 +130,8 @@ contract DisputeRegistry is MasterRegistry {
             disputedArea: disputedArea,
             complaintDocumentHash: complaintHash,
             evidenceHash: evidenceHash,
+            courtOrderHash: bytes32(0),
+            resolvedAt: 0,
             status: DisputeStatus.REGISTERED,
             createdAt: block.timestamp
         });
@@ -117,36 +153,58 @@ contract DisputeRegistry is MasterRegistry {
     )
         external
         onlyRole(RECORD_EXECUTOR_ROLE)
+        onlyRegistryWallet
     {
         Dispute storage dispute = disputes[disputeId];
         require(bytes(dispute.parcelId).length > 0, "Dispute does not exist");
 
         DisputeStatus oldStatus = dispute.status;
         require(oldStatus != newStatus, "Status is unchanged");
-        require(newStatus != DisputeStatus.REGISTERED, "Cannot reset status");
-
-        bool wasActive = oldStatus == DisputeStatus.REGISTERED ||
-            oldStatus == DisputeStatus.UNDER_REVIEW;
-        bool isActive = newStatus == DisputeStatus.REGISTERED ||
-            newStatus == DisputeStatus.UNDER_REVIEW;
-
-        if (wasActive && !isActive) {
-            activeDisputedAreaByParcel[dispute.parcelId] -= dispute.disputedArea;
-        } else if (!wasActive && isActive) {
-            Parcel memory parcel = parcels[dispute.parcelId];
-
-            require(
-                activeDisputedAreaByParcel[dispute.parcelId] +
-                    dispute.disputedArea <= parcel.remainingArea,
-                "Active disputed area exceeds parcel area"
-            );
-
-            activeDisputedAreaByParcel[dispute.parcelId] += dispute.disputedArea;
-        }
+        require(
+            (oldStatus == DisputeStatus.REGISTERED &&
+                newStatus == DisputeStatus.UNDER_REVIEW) ||
+                (oldStatus == DisputeStatus.RESOLVED &&
+                    newStatus == DisputeStatus.CLOSED),
+            "Status transition requires court resolution"
+        );
 
         dispute.status = newStatus;
 
         emit DisputeStatusUpdated(disputeId, oldStatus, newStatus);
+    }
+
+    function resolveDisputeByCourt(
+        uint256 disputeId,
+        bytes32 courtOrderHash
+    )
+        external
+        onlyRole(COURT_AUTHORITY_ROLE)
+        onlyCourtAuthority
+    {
+        Dispute storage dispute = disputes[disputeId];
+
+        require(bytes(dispute.parcelId).length > 0, "Dispute does not exist");
+        require(courtOrderHash != bytes32(0), "Court order hash required");
+        require(dispute.status != DisputeStatus.RESOLVED, "Dispute already resolved");
+        require(dispute.status != DisputeStatus.CLOSED, "Dispute is closed");
+
+        bool wasActive = dispute.status == DisputeStatus.REGISTERED ||
+            dispute.status == DisputeStatus.UNDER_REVIEW;
+
+        if (wasActive) {
+            activeDisputedAreaByParcel[dispute.parcelId] -= dispute.disputedArea;
+        }
+
+        dispute.status = DisputeStatus.RESOLVED;
+        dispute.courtOrderHash = courtOrderHash;
+        dispute.resolvedAt = block.timestamp;
+
+        emit DisputeResolvedByCourt(
+            disputeId,
+            dispute.parcelId,
+            courtOrderHash,
+            msg.sender
+        );
     }
 
     function getDispute(uint256 disputeId)
@@ -171,5 +229,17 @@ contract DisputeRegistry is MasterRegistry {
         returns (uint256)
     {
         return activeDisputedAreaByParcel[parcelId];
+    }
+
+    function _beforeParcelMutation(string memory parcelId)
+        internal
+        view
+        override
+    {
+        require(msg.sender == registryWallet, "Only multisig can mutate parcels");
+        require(
+            activeDisputedAreaByParcel[parcelId] == 0,
+            "Parcel has an unresolved dispute"
+        );
     }
 }
