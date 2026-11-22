@@ -34,3 +34,4 @@
 /.agents
 /scripts
 /package-lock.json
+/ignition/deployments/*
